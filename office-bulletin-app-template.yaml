@@ -2,73 +2,91 @@ apiVersion: template.openshift.io/v1
 kind: Template
 metadata:
   name: office-bulletin-app
+
 parameters:
-- name: GIT_URL
-  description: HTTPS URL of your GitHub repo
-  required: true
-- name: FRONTEND_DIR
-  description: Path to frontend code
-  required: true
-  value: frontend
-- name: STORAGE_SIZE
-  description: Size for PostgreSQL data
-  required: true
-  value: 1Gi
+  - name: GIT_URL
+    description: "HTTPS URL of your GitHub repo"
+    required: true
+
+  - name: FRONTEND_DIR
+    description: "Path to frontend code"
+    required: true
+    value: frontend
+
+  - name: STORAGE_SIZE
+    description: "Size for PostgreSQL data"
+    required: true
+    value: 1Gi
+
 objects:
-  # PVC for Postgres
+  # 1) PVC for Postgres
   - apiVersion: v1
     kind: PersistentVolumeClaim
-    metadata: { name: pg-pvc }
+    metadata:
+      name: pg-pvc
     spec:
-      accessModes: [ ReadWriteOnce ]
-      resources: { requests: { storage: ${STORAGE_SIZE} } }
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: ${STORAGE_SIZE}
 
-  # Postgres DeploymentConfig
+  # 2) Postgres DeploymentConfig
   - apiVersion: apps.openshift.io/v1
     kind: DeploymentConfig
-    metadata: { name: dc-postgres }
+    metadata:
+      name: dc-postgres
     spec:
       replicas: 1
-      selector: { app: postgres }
+      selector:
+        app: postgres
       template:
-        metadata: { labels: { app: postgres } }
+        metadata:
+          labels:
+            app: postgres
         spec:
           containers:
-          - name: postgres
-            image: postgres:13
-            env:
-            - name: POSTGRES_DB
-              value: bulletindb
-            - name: POSTGRES_USER
-              value: bulletin
-            - name: POSTGRES_PASSWORD
-              value: bulletinpass
-            volumeMounts:
-            - mountPath: /var/lib/pgsql/data
-              name: pgdata
+            - name: postgres
+              image: postgres:13
+              env:
+                - name: POSTGRES_DB
+                  value: bulletindb
+                - name: POSTGRES_USER
+                  value: bulletin
+                - name: POSTGRES_PASSWORD
+                  value: bulletinpass
+              volumeMounts:
+                - mountPath: /var/lib/pgsql/data
+                  name: pgdata
           volumes:
-          - name: pgdata
-            persistentVolumeClaim:
-              claimName: pg-pvc
-      triggers:
+            - name: pgdata
+              persistentVolumeClaim:
+                claimName: pg-pvc
+    triggers:
       - type: ConfigChange
 
-  # Postgres Service
+  # 3) Postgres Service
   - apiVersion: v1
     kind: Service
-    metadata: { name: svc-postgres }
+    metadata:
+      name: svc-postgres
     spec:
-      selector: { app: postgres }
-      ports: [ { port: 5432, targetPort: 5432 } ]
+      selector:
+        app: postgres
+      ports:
+        - port: 5432
+          targetPort: 5432
 
-  # PHP Frontend BuildConfig
+  # 4) PHP Frontend BuildConfig
   - apiVersion: build.openshift.io/v1
     kind: BuildConfig
-    metadata: { name: bc-frontend }
+    metadata:
+      name: bc-frontend
     spec:
       source:
         type: Git
-        git:   { uri: "${GIT_URL}" }
+        git:
+          uri: "${GIT_URL}"
         contextDir: "${FRONTEND_DIR}"
       strategy:
         type: Source
@@ -81,36 +99,44 @@ objects:
           kind: ImageStreamTag
           name: bulletin-frontend:latest
       triggers:
-      - type: GitHub; github: { secret: webhooksecret }
-      - type: Generic; generic: { secret: webhooksecret }
-      - type: ImageChange
-      - type: ConfigChange
+        - type: GitHub
+          github:
+            secret: webhooksecret
+        - type: Generic
+          generic:
+            secret: webhooksecret
+        - type: ImageChange
+        - type: ConfigChange
 
-  # PHP Frontend DeploymentConfig
+  # 5) PHP Frontend DeploymentConfig
   - apiVersion: apps.openshift.io/v1
     kind: DeploymentConfig
-    metadata: { name: dc-frontend }
+    metadata:
+      name: dc-frontend
     spec:
       replicas: 1
-      selector: { app: frontend }
+      selector:
+        app: frontend
       template:
-        metadata: { labels: { app: frontend } }
+        metadata:
+          labels:
+            app: frontend
         spec:
           containers:
-          - name: php
-            image: bulletin-frontend:latest
-            env:
-            - name: DB_HOST
-              value: svc-postgres
-            - name: DB_NAME
-              value: bulletindb
-            - name: DB_USER
-              value: bulletin
-            - name: DB_PASSWORD
-              value: bulletinpass
-            ports:
-            - containerPort: 8080
-      triggers:
+            - name: php
+              image: bulletin-frontend:latest
+              env:
+                - name: DB_HOST
+                  value: svc-postgres
+                - name: DB_NAME
+                  value: bulletindb
+                - name: DB_USER
+                  value: bulletin
+                - name: DB_PASSWORD
+                  value: bulletinpass
+              ports:
+                - containerPort: 8080
+    triggers:
       - type: ImageChange
         imageChangeParams:
           automatic: true
@@ -118,19 +144,26 @@ objects:
             kind: ImageStreamTag
             name: bulletin-frontend:latest
           containerNames:
-          - php
+            - php
       - type: ConfigChange
 
-  # Frontend Service & Route
+  # 6) Frontend Service & Route
   - apiVersion: v1
     kind: Service
-    metadata: { name: svc-frontend }
+    metadata:
+      name: svc-frontend
     spec:
-      selector: { app: frontend }
-      ports: [ { port: 8080, targetPort: 8080 } ]
+      selector:
+        app: frontend
+      ports:
+        - port: 8080
+          targetPort: 8080
 
   - apiVersion: route.openshift.io/v1
     kind: Route
-    metadata: { name: route-frontend }
+    metadata:
+      name: route-frontend
     spec:
-      to: { kind: Service, name: svc-frontend }
+      to:
+        kind: Service
+        name: svc-frontend
