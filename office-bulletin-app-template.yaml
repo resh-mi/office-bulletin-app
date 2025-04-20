@@ -2,36 +2,28 @@ apiVersion: template.openshift.io/v1
 kind: Template
 metadata:
   name: office-bulletin-app
-
 parameters:
-  - name: GIT_URL
-    description: "HTTPS URL of your GitHub repo"
-    required: true
-
-  - name: FRONTEND_DIR
-    description: "Path to frontend code"
-    required: true
-    value: frontend
-
-  - name: STORAGE_SIZE
-    description: "Size for PostgreSQL data"
-    required: true
-    value: 1Gi
-
+- name: GIT_URL
+  required: true
+- name: FRONTEND_DIR
+  required: true
+  value: frontend
+- name: STORAGE_SIZE
+  required: true
+  value: 1Gi
 objects:
-  # 1) PVC for Postgres
+  # 1) PVC
   - apiVersion: v1
     kind: PersistentVolumeClaim
     metadata:
       name: pg-pvc
     spec:
-      accessModes:
-        - ReadWriteOnce
+      accessModes: [ ReadWriteOnce ]
       resources:
         requests:
           storage: ${STORAGE_SIZE}
 
-  # 2) Postgres DeploymentConfig
+  # 2) Postgres DC with fsGroup and correct mountPath
   - apiVersion: apps.openshift.io/v1
     kind: DeploymentConfig
     metadata:
@@ -45,24 +37,26 @@ objects:
           labels:
             app: postgres
         spec:
+          securityContext:
+            fsGroup: 26
           containers:
-            - name: postgres
-              image: postgres:13
-              env:
-                - name: POSTGRES_DB
-                  value: bulletindb
-                - name: POSTGRES_USER
-                  value: bulletin
-                - name: POSTGRES_PASSWORD
-                  value: bulletinpass
-              volumeMounts:
-                - mountPath: /var/lib/pgsql/data
-                  name: pgdata
-          volumes:
+          - name: postgres
+            image: postgres:13
+            env:
+            - name: POSTGRES_DB
+              value: bulletindb
+            - name: POSTGRES_USER
+              value: bulletin
+            - name: POSTGRES_PASSWORD
+              value: bulletinpass
+            volumeMounts:
             - name: pgdata
-              persistentVolumeClaim:
-                claimName: pg-pvc
-    triggers:
+              mountPath: /var/lib/postgresql/data
+          volumes:
+          - name: pgdata
+            persistentVolumeClaim:
+              claimName: pg-pvc
+      triggers:
       - type: ConfigChange
 
   # 3) Postgres Service
@@ -74,8 +68,8 @@ objects:
       selector:
         app: postgres
       ports:
-        - port: 5432
-          targetPort: 5432
+      - port: 5432
+        targetPort: 5432
 
   # 4) PHP Frontend BuildConfig
   - apiVersion: build.openshift.io/v1
@@ -99,16 +93,12 @@ objects:
           kind: ImageStreamTag
           name: bulletin-frontend:latest
       triggers:
-        - type: GitHub
-          github:
-            secret: webhooksecret
-        - type: Generic
-          generic:
-            secret: webhooksecret
-        - type: ImageChange
-        - type: ConfigChange
+      - type: GitHub;    github: { secret: webhooksecret }
+      - type: Generic;   generic: { secret: webhooksecret }
+      - type: ImageChange
+      - type: ConfigChange
 
-  # 5) PHP Frontend DeploymentConfig
+  # 5) PHP Frontend DC
   - apiVersion: apps.openshift.io/v1
     kind: DeploymentConfig
     metadata:
@@ -123,28 +113,27 @@ objects:
             app: frontend
         spec:
           containers:
-            - name: php
-              image: bulletin-frontend:latest
-              env:
-                - name: DB_HOST
-                  value: svc-postgres
-                - name: DB_NAME
-                  value: bulletindb
-                - name: DB_USER
-                  value: bulletin
-                - name: DB_PASSWORD
-                  value: bulletinpass
-              ports:
-                - containerPort: 8080
-    triggers:
+          - name: php
+            image: bulletin-frontend:latest
+            env:
+            - name: DB_HOST
+              value: svc-postgres
+            - name: DB_NAME
+              value: bulletindb
+            - name: DB_USER
+              value: bulletin
+            - name: DB_PASSWORD
+              value: bulletinpass
+            ports:
+            - containerPort: 8080
+      triggers:
       - type: ImageChange
         imageChangeParams:
           automatic: true
           from:
             kind: ImageStreamTag
             name: bulletin-frontend:latest
-          containerNames:
-            - php
+          containerNames: [ php ]
       - type: ConfigChange
 
   # 6) Frontend Service & Route
@@ -156,8 +145,8 @@ objects:
       selector:
         app: frontend
       ports:
-        - port: 8080
-          targetPort: 8080
+      - port: 8080
+        targetPort: 8080
 
   - apiVersion: route.openshift.io/v1
     kind: Route
